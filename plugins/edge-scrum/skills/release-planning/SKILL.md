@@ -50,7 +50,7 @@ components:
 
 1. **Steps 0–1**: Load laws/roster, gather release parameters (main context)
 2. **Phase 2**: Fetch sprints + features inline using MCP tools → transform scripts (main context)
-3. **Phase 3**: Fetch epics + spikes inline using MCP tools → transform scripts (main context)
+3. **Phase 3**: Fetch epics inline using MCP tools → transform scripts (main context)
 4. **Phase 4**: Fetch stories + bugs inline using MCP tools → transform scripts (main context)
 5. **Phase 5a**: Run `run-checks.py` — deterministic data-quality gate + 6 checks → `checks.json`
 6. **Phase 5b**: Delegate narrative to sub-agent — reads `checks.json`, writes `recommendations.json`
@@ -149,17 +149,25 @@ Record `WORKDIR` — substitute it into all agent prompts.
 
 ### Phase 2: Sprint + Feature Collection (inline)
 
-Identical to release-health Phase 2 (standard mode JQL only).
+Like release-health Phase 2 (standard mode JQL only), except planning skips the
+closed-sprint fetch — see 2a.
 
 #### 2a — Fetch Sprints
 
-Call `jira_get_sprints_from_board` for board_id `"11479"` three times:
+Call `jira_get_sprints_from_board` for board_id `"11479"` twice:
 
 - `state="active"`
-- `state="closed"` — paginate using `page_token`; use `limit=50`
 - `state="future"`
 
-After all pages are fetched, note all persisted file paths and run:
+Do **not** fetch `state="closed"`. The planning pipeline never reads closed-sprint data:
+`run-checks.py` takes `--remaining-sprints` as a number, and every sprint-derived figure
+(`remaining_sprint_count`, the active/dormant release-window check) is computed from active +
+future sprints or from sprint numbers on the stories themselves. The board returns closed
+sprints oldest-first across the full history (hundreds of sprints, many pages), so fetching
+them costs a large amount of context for no effect on the report. (Release-health, which does
+use closed sprints for its refinement checks, keeps its own closed-sprint fetch.)
+
+After both calls, note all persisted file paths and run:
 
 ```bash
 python3 plugins/edge-scrum/bin/transform-sprints.py \
@@ -206,9 +214,10 @@ Read and check:
 
 ---
 
-### Phase 3: Epic + Spike Collection (inline)
+### Phase 3: Epic Collection (inline)
 
-Identical to release-health Phase 3.
+Like release-health Phase 3, except planning does not fetch spikes — they feed only the
+release-health refinement checks, not the planning report.
 
 #### 3a — Fetch Epics
 
@@ -230,28 +239,7 @@ python3 plugins/edge-scrum/bin/transform-epics.py \
   --output {WORKDIR}/epics.json
 ```
 
-#### 3b — Fetch Spikes
-
-Read `{WORKDIR}/sprints.json`. Extract `refinement_sprint_id`.
-
-Call `jira_search`:
-
-- **JQL:** `project in (OCPEDGE, USHIFT) AND issuetype = Spike AND sprint = {refinement_sprint_id}`
-- **Fields:** `key, summary, status, assignee, issuelinks`
-- **limit:** `50`
-
-Paginate using `page_token`. After all pages fetched, run:
-
-```bash
-python3 plugins/edge-scrum/bin/transform-spikes.py \
-  --input <all_persisted_file_paths> \
-  --features-file {WORKDIR}/features.json \
-  --epics-file {WORKDIR}/epics.json \
-  --sprints-file {WORKDIR}/sprints.json \
-  --output {WORKDIR}/spikes.json
-```
-
-#### 3c — Verify
+#### 3b — Verify
 
 Read `{WORKDIR}/epics.json` and verify: `epic_keys` is a non-empty array, `feature_to_epics` is an object, and `epics` is an array. If any check fails, warn the user with a descriptive error and stop.
 
