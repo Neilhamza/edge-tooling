@@ -6,9 +6,9 @@ Layout (see references/release-planning-report-template.md):
     verdict → decisions → cut line → people over target → dormant scope →
     process gaps → how the numbers are computed → collapsible appendix
 
-Both .md and .docx are rendered from the same block model so they cannot
-drift. Every figure comes from checks.json; recommendations.json supplies
-narrative only. Feature keys are rendered as "Name (KEY)" and linked.
+The report is rendered to Markdown from a block model built once from
+checks.json; recommendations.json supplies narrative only. Feature keys
+are rendered as "Name (KEY)" and linked.
 """
 
 import argparse
@@ -21,29 +21,11 @@ from _jira_transforms import load_json
 
 JIRA_BASE = "https://redhat.atlassian.net/browse"
 JIRA_KEY_RE = re.compile(r"(?<!\[)(?<!/)\b(OCPSTRAT-\d+|OCPEDGE-\d+|USHIFT-\d+|OCPBUGS-\d+)\b(?!\])")
-EMOJI_RE = re.compile("[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F]")
 GENDERED_RE = re.compile(r"\b(he|she|him|her|his|hers|himself|herself)\b", re.IGNORECASE)
 
 RISK_GLYPH = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢", "N/A": "⚪"}
 FITS_GLYPH = {"fits": "✅", "partial": "⚠️ partial", "over": "❌"}
 METHOD_DOC = "plugins/edge-scrum/references/release-planning-method.md"
-
-# Section rendering order and H2 headings, shared by the DOCX and HTML renderers
-# so they cannot drift. None = the block carries no heading of its own.
-SECTION_ORDER = [
-    ("VERDICT", None), ("SUMMARY_STRIP", None), ("STATS_LINE", None),
-    ("DECISIONS", "Decisions needed this week"), ("CUT_LINE", "Where the cut line falls"),
-    ("PEOPLE", "People over target"), ("DORMANT", "Scope nobody has started"),
-    ("GAPS", "Process gaps"), ("METHOD", "How the numbers are computed"),
-    ("APPENDIX", None), ("FOOTER", None),
-]
-
-# Risk token → CSS class for HTML risk cells (mirrors the DOCX RISK_COLORS palette).
-RISK_CLASS = {
-    "HIGH": "r-high", "OVER": "r-high", "FAIL": "r-high", "NO_CONTRIBUTORS": "r-high",
-    "MEDIUM": "r-med", "WARN": "r-med", "NOT_IN_ROSTER": "r-med", "MISMATCH": "r-med",
-    "LOW": "r-low", "OK": "r-low", "PASS": "r-low",
-}
 
 
 def short_version(v):
@@ -428,302 +410,6 @@ def render_markdown(checks, recs, template, params):
     return jira_linkify(text).rstrip() + "\n"
 
 
-# --- DOCX renderer ---------------------------------------------------------
-
-
-def render_docx(checks, recs, params, output_path):
-    from docx import Document
-    from docx.shared import Pt, Cm, RGBColor
-    from docx.enum.table import WD_TABLE_ALIGNMENT
-    from docx.enum.text import WD_BREAK
-    from docx.oxml.ns import nsdecls
-    from docx.oxml import parse_xml
-
-    DARK_BLUE = RGBColor(0x1B, 0x3A, 0x5C)
-    HEADING_BLUE = RGBColor(0x2C, 0x5F, 0x8A)
-    RISK_COLORS = {
-        "HIGH": ("FADBD8", RGBColor(0xC0, 0x39, 0x2B)), "OVER": ("FADBD8", RGBColor(0xC0, 0x39, 0x2B)),
-        "FAIL": ("FADBD8", RGBColor(0xC0, 0x39, 0x2B)), "NO_CONTRIBUTORS": ("FADBD8", RGBColor(0xC0, 0x39, 0x2B)),
-        "MEDIUM": ("FEF9E7", RGBColor(0xB7, 0x95, 0x0B)), "WARN": ("FEF9E7", RGBColor(0xB7, 0x95, 0x0B)),
-        "NOT_IN_ROSTER": ("FEF9E7", RGBColor(0xB7, 0x95, 0x0B)), "MISMATCH": ("FEF9E7", RGBColor(0xB7, 0x95, 0x0B)),
-        "LOW": ("D5F5E3", RGBColor(0x1E, 0x8E, 0x3E)), "OK": ("D5F5E3", RGBColor(0x1E, 0x8E, 0x3E)),
-        "PASS": ("D5F5E3", RGBColor(0x1E, 0x8E, 0x3E)),
-    }
-    ALT_ROW_BG = "F2F2F2"
-
-    doc = Document()
-    style = doc.styles["Normal"]
-    style.font.name = "Calibri"
-    style.font.size = Pt(11)
-    for level, sz, color in [("Heading 1", 20, DARK_BLUE), ("Heading 2", 15, HEADING_BLUE), ("Heading 3", 12, HEADING_BLUE)]:
-        s = doc.styles[level]
-        s.font.name = "Calibri"
-        s.font.size = Pt(sz)
-        s.font.color.rgb = color
-        s.font.bold = True
-    for section in doc.sections:
-        section.top_margin = section.bottom_margin = Cm(2.0)
-        section.left_margin = section.right_margin = Cm(2.0)
-
-    def clean(text):
-        text = EMOJI_RE.sub("", str(text))
-        text = re.sub(r"<sub>(.*?)</sub>", r" (\1)", text)
-        text = re.sub(r"<[^>]+>", "", text)
-        text = text.replace("**", "").replace("`", "")
-        text = re.sub(r"(?<!\w)[_*](.+?)[_*](?!\w)", r"\1", text)
-        text = JIRA_KEY_RE.sub(r"\1", text)
-        return text.strip()
-
-    def set_shading(cell, color_hex):
-        cell._element.get_or_add_tcPr().append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="{color_hex}" w:val="clear"/>'))
-
-    def add_table(headers, rows, risk_cols=None):
-        risk_cols = risk_cols or set()
-        table = doc.add_table(rows=1, cols=len(headers))
-        table.alignment = WD_TABLE_ALIGNMENT.LEFT
-        for i, h in enumerate(headers):
-            cell = table.rows[0].cells[i]
-            cell.text = ""
-            run = cell.paragraphs[0].add_run(clean(h))
-            run.bold = True
-            run.font.size = Pt(9)
-            run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-            set_shading(cell, "2C5F8A")
-        if not rows:
-            rows = [["none"] + [""] * (len(headers) - 1)]
-        for ri, row in enumerate(rows):
-            cells = table.add_row().cells
-            for ci, val in enumerate(row[:len(headers)]):
-                cell = cells[ci]
-                cell.text = ""
-                text = clean(val)
-                run = cell.paragraphs[0].add_run(text)
-                run.font.size = Pt(9)
-                token = text.strip().upper().split(" ")[0] if text else ""
-                if ci in risk_cols and token in RISK_COLORS:
-                    bg, fg = RISK_COLORS[token]
-                    set_shading(cell, bg)
-                    run.font.color.rgb = fg
-                    run.bold = True
-                elif ri % 2 == 1:
-                    set_shading(cell, ALT_ROW_BG)
-        tbl_pr = table._tbl.tblPr
-        tbl_pr.append(parse_xml(
-            f'<w:tblBorders {nsdecls("w")}>' + "".join(
-                f'<w:{side} w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/>'
-                for side in ("top", "left", "bottom", "right", "insideH", "insideV")) + "</w:tblBorders>"))
-        doc.add_paragraph()
-
-    def render(blist):
-        for b in blist:
-            t = b["t"]
-            if t == "p":
-                p = doc.add_paragraph()
-                text = clean(b["text"])
-                bold = str(b["text"]).startswith("**")
-                first, _, rest = text.partition(".")
-                if bold and rest:
-                    r = p.add_run(first + ".")
-                    r.bold = True
-                    p.add_run(rest)
-                else:
-                    p.add_run(text)
-            elif t == "small":
-                p = doc.add_paragraph()
-                r = p.add_run(clean(b["text"]))
-                r.font.size = Pt(8.5)
-                r.italic = True
-            elif t == "h3":
-                doc.add_heading(clean(b["text"]), level=3)
-            elif t == "table":
-                add_table(b["headers"], b["rows"], b.get("risk_cols"))
-            elif t == "bullets":
-                for item in b["items"]:
-                    doc.add_paragraph(clean(item), style="List Bullet")
-            elif t == "details":
-                if b.get("page_break"):
-                    doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
-                    doc.add_heading(clean(b["summary"]), level=2)
-                else:
-                    doc.add_heading(clean(b["summary"]), level=3)
-                render(b["blocks"])
-
-    blocks = build_blocks(checks, recs, params)
-    doc.add_heading(f"OCP {params['version']} Planning Risk", level=1)
-    for key, heading in SECTION_ORDER:
-        if heading:
-            doc.add_heading(heading, level=2)
-        render(blocks.get(key, []))
-
-    doc.save(output_path)
-    print(f"Wrote {output_path}", file=sys.stderr)
-
-
-# --- HTML renderer ---------------------------------------------------------
-
-_HTML_ESCAPE = (("&", "&amp;"), ("<", "&lt;"), (">", "&gt;"))
-_ALIGN_CSS = {"l": "left", "r": "right", "c": "center"}
-
-
-def _html_escape(text):
-    """Entity-encode HTML metacharacters for a plain text context (no markup)."""
-    text = str(text)
-    for a, b in _HTML_ESCAPE:
-        text = text.replace(a, b)
-    return text
-
-
-def _html_inline(text):
-    """Convert the report's inline markup to HTML, escaping metacharacters.
-
-    Order matters: <sub> is preserved verbatim across escaping; then `code`,
-    **bold**, *italic* and bare Jira keys become tags. Escaping runs before the
-    markup substitutions so user text can never inject markup.
-    """
-    text = str(text)
-    text = text.replace("<sub>", "\x00SUB\x00").replace("</sub>", "\x00/SUB\x00")
-    for a, b in _HTML_ESCAPE:
-        text = text.replace(a, b)
-    text = text.replace("\x00SUB\x00", "<sub>").replace("\x00/SUB\x00", "</sub>")
-    text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
-    text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
-    text = re.sub(r"(?<!\w)\*(.+?)\*(?!\w)", r"<em>\1</em>", text)
-    text = JIRA_KEY_RE.sub(rf'<a href="{JIRA_BASE}/\1">\1</a>', text)
-    return text
-
-
-def _html_table(headers, rows, align=None, risk_cols=None):
-    align = align or ["l"] * len(headers)
-    risk_cols = risk_cols or set()
-
-    def style(i):
-        a = _ALIGN_CSS.get(align[i] if i < len(align) else "l", "left")
-        return f' style="text-align:{a}"' if a != "left" else ""
-
-    out = ["<table>", "<thead>", "<tr>"]
-    for i, h in enumerate(headers):
-        out.append(f"<th{style(i)}>{_html_inline(h)}</th>")
-    out += ["</tr>", "</thead>", "<tbody>"]
-    if not rows:
-        rows = [["none"] + [""] * (len(headers) - 1)]
-    for row in rows:
-        cells = [c for c in row[:len(headers)]]
-        while len(cells) < len(headers):
-            cells.append("")
-        out.append("<tr>")
-        for ci, val in enumerate(cells):
-            cls = ""
-            if ci in risk_cols:
-                token = EMOJI_RE.sub("", str(val)).strip().upper().split(" ")[0]
-                if token in RISK_CLASS:
-                    cls = f' class="{RISK_CLASS[token]}"'
-            out.append(f"<td{style(ci)}{cls}>{_html_inline(val)}</td>")
-        out.append("</tr>")
-    out += ["</tbody>", "</table>"]
-    return "\n".join(out)
-
-
-def render_blocks_html(blocks):
-    out = []
-    for b in blocks:
-        t = b["t"]
-        if t == "p":
-            for para in str(b["text"]).split("\n\n"):
-                out.append(f"<p>{_html_inline(para)}</p>")
-        elif t == "small":
-            out.append(f'<p class="note">{_html_inline(b["text"])}</p>')
-        elif t == "h3":
-            out.append(f"<h3>{_html_inline(b['text'])}</h3>")
-        elif t == "table":
-            out.append(_html_table(b["headers"], b["rows"], b.get("align"), b.get("risk_cols")))
-        elif t == "bullets":
-            items = "\n".join(f"<li>{_html_inline(i)}</li>" for i in b["items"])
-            out.append(f"<ul>\n{items}\n</ul>")
-        elif t == "details":
-            inner = render_blocks_html(b["blocks"])
-            out.append(
-                f"<details>\n<summary><strong>{_html_inline(b['summary'])}</strong></summary>\n{inner}\n</details>")
-    return "\n".join(out)
-
-
-_HTML_STYLE = """
-:root { color-scheme: light dark; }
-* { box-sizing: border-box; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  max-width: 900px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5;
-  color: #1f2328; background: #ffffff;
-}
-h1 { font-size: 1.8rem; border-bottom: 1px solid #d0d7de; padding-bottom: .3em; }
-h2 { font-size: 1.4rem; border-bottom: 1px solid #d0d7de; padding-bottom: .3em; margin-top: 1.8em; }
-h3 { font-size: 1.1rem; }
-p.note { color: #656d76; font-size: .85rem; }
-code { background: #eff1f3; padding: .15em .3em; border-radius: 4px; font-size: .9em; }
-a { color: #0969da; text-decoration: none; }
-a:hover { text-decoration: underline; }
-table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: .9rem; }
-th, td { border: 1px solid #d0d7de; padding: 6px 13px; }
-th { background: #f6f8fa; text-align: left; }
-tbody tr:nth-child(2n) { background: #f6f8fa; }
-/* Backgrounds keep the DOCX palette; text darkened to clear WCAG AA 4.5:1
-   (C0392B/B7950B/1E8E3E on these tints were 4.19/2.72/3.60) while keeping the hue. */
-td.r-high { background: #FADBD8; color: #A5281B; font-weight: 600; }
-td.r-med  { background: #FEF9E7; color: #7A5C00; font-weight: 600; }
-td.r-low  { background: #D5F5E3; color: #10662B; font-weight: 600; }
-details { margin: 1em 0; }
-summary { cursor: pointer; }
-@media (prefers-color-scheme: dark) {
-  body { color: #e6edf3; background: #0d1117; }
-  h1, h2 { border-bottom-color: #30363d; }
-  p.note { color: #8b949e; }
-  code { background: #161b22; }
-  a { color: #4493f8; }
-  th, td { border-color: #30363d; }
-  th { background: #161b22; }
-  tbody tr:nth-child(2n) { background: #161b22; }
-  td.r-high { background: #3a1d1a; color: #f5a9a0; }
-  td.r-med  { background: #33300f; color: #e6d16b; }
-  td.r-low  { background: #12331f; color: #7ee2a8; }
-}
-"""
-
-_HTML_DOC = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{TITLE}}</title>
-<style>{{STYLE}}</style>
-</head>
-<body>
-{{BODY}}
-</body>
-</html>
-"""
-
-
-def render_html(checks, recs, params, output_path):
-    """Emit a self-contained .html from the same block model as .md/.docx."""
-    blocks = build_blocks(checks, recs, params)
-    # --version is arbitrary text; escape once and reuse for both the <title> and <h1>
-    # so a value like "</title><script>..." can't inject markup into the report.
-    title = _html_escape(f"OCP {params['version']} Planning Risk")
-    parts = [f"<h1>{title}</h1>"]
-    for key, heading in SECTION_ORDER:
-        if heading:
-            parts.append(f"<h2>{heading}</h2>")
-        rendered = render_blocks_html(blocks.get(key, []))
-        if rendered:
-            parts.append(rendered)
-    html = (_HTML_DOC
-            .replace("{{TITLE}}", title)
-            .replace("{{STYLE}}", _HTML_STYLE)
-            .replace("{{BODY}}", "\n".join(parts)))
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f"Wrote {output_path}", file=sys.stderr)
-
-
 # --- Validation of the narrative -------------------------------------------
 
 
@@ -813,12 +499,10 @@ def main():
     parser.add_argument("--total-dev-sprints", required=True)
     parser.add_argument("--output", required=True, help="Output base path (without extension)")
     parser.add_argument("--strict", action="store_true", help="Fail if recommendations.json violates the writing rules")
-    parser.add_argument("--open", dest="open_report", action="store_true",
-                        help="Open the generated .html in the default browser (omit when running headless)")
     args = parser.parse_args()
 
-    # --version flows into all three outputs (the .md/.docx text is not HTML-escaped);
-    # validate it at the trust boundary with an allow-list so no output can carry markup.
+    # --version flows into the Markdown output unescaped; validate it at the trust
+    # boundary with an allow-list so the output can't carry injected markup.
     if not re.fullmatch(r"\d+\.\d+(?:\.\d+|\.z)?", str(args.version)):
         parser.error(f"--version must look like 5.1, 5.1.0 or 5.1.z, got {args.version!r}")
 
@@ -848,18 +532,6 @@ def main():
     with open(args.output + ".md", "w") as f:
         f.write(render_markdown(checks, recs, template, params))
     print(f"Wrote {args.output}.md", file=sys.stderr)
-    render_docx(checks, recs, params, args.output + ".docx")
-    html_output = args.output + ".html"
-    render_html(checks, recs, params, html_output)
-
-    if args.open_report:
-        # Best-effort: on a headless/remote session this silently does nothing (or
-        # warns); never let it change the exit code, the report is already written.
-        try:
-            import webbrowser
-            webbrowser.open("file://" + os.path.abspath(html_output))
-        except Exception as e:  # noqa: BLE001 - opening a browser must never fail the run
-            print(f"WARNING: could not open {html_output} in a browser: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

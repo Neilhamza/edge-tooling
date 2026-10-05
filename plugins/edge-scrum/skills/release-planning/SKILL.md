@@ -1,7 +1,7 @@
 ---
 name: release-planning
 description: Use when assessing whether the team can deliver planned scope within remaining time — evaluates capacity, timeline, assignment, bug load, sizing, and progress risks per person and per feature to surface planning risks before they become execution problems
-allowed-tools: Agent, AskUserQuestion, Write, Read, Glob, Bash, mcp__plugin_mcp-atlassian_mcp-atlassian__jira_get_sprints_from_board, mcp__plugin_mcp-atlassian_mcp-atlassian__jira_search, mcp__plugin_two-node_mcp-atlassian__jira_get_sprints_from_board, mcp__plugin_two-node_mcp-atlassian__jira_search
+allowed-tools: Agent, AskUserQuestion, Write, Read, Glob, Bash, mcp__plugin_mcp-atlassian_mcp-atlassian__jira_get_sprints_from_board, mcp__plugin_mcp-atlassian_mcp-atlassian__jira_search
 user-invocable: true
 argument-hint: "<version> <sprint-range> bc:<branch-cut> [pd:<pencils-down>] [--component <component>]"
 ---
@@ -54,11 +54,11 @@ components:
 4. **Phase 4**: Fetch stories + bugs inline using MCP tools → transform scripts (main context)
 5. **Phase 5a**: Run `run-checks.py` — deterministic data-quality gate + 6 checks → `checks.json`
 6. **Phase 5b**: Delegate narrative to sub-agent — reads `checks.json`, writes `recommendations.json`
-7. **Step 6**: Run `assemble-report.py` — produces `.md`, `.docx` and `.html` from structured data
+7. **Step 6**: Run `assemble-report.py` — produces `.md` from structured data
 
 **Rules:**
 
-- Data fetching uses MCP tools directly in the main context. Two Atlassian MCP servers may be present (`plugin_mcp-atlassian` and `plugin_two-node`); use whichever responds — they expose the same `jira_search` / `jira_get_sprints_from_board` tools
+- Data fetching uses MCP tools directly in the main context. Requires the standard `mcp-atlassian` plugin MCP server; if its tools are unavailable, stop and tell the user to enable it
 - MCP responses are large and get persisted to files automatically — note those file paths
 - Transform scripts (`plugins/edge-scrum/bin/`) convert raw MCP data to structured JSON
 - Use `check-page.py` to extract pagination info from persisted files
@@ -361,7 +361,7 @@ Verify `{WORKDIR}/recommendations.json` was written and contains `headline` and 
 
 ### Step 6: Assemble Report (main context)
 
-Run the report assembly script. This renders both markdown and DOCX from structured data — no markdown parsing needed:
+Run the report assembly script. This renders Markdown from structured data — no markdown parsing needed:
 
 ```bash
 python3 plugins/edge-scrum/bin/assemble-report.py \
@@ -376,11 +376,10 @@ python3 plugins/edge-scrum/bin/assemble-report.py \
   --remaining-sprints {REMAINING_SPRINT_COUNT} \
   --total-dev-sprints {TOTAL_DEV_SPRINTS} \
   --strict \
-  --open \
   --output .reports/release_planning_{VERSION}_{TODAY}
 ```
 
-This produces `.reports/release_planning_{VERSION}_{TODAY}.md`, `.docx` and `.html` with styled tables, risk-level coloring, and Jira hyperlinks. Features render as "Name (KEY)"; the appendix is collapsible in Markdown and HTML, and a separate page in DOCX. The `.html` is self-contained (embedded stylesheet, light/dark aware) and opens formatted in any browser. The report opens in the default browser when assembly finishes; omit `--open` when running headless.
+This produces `.reports/release_planning_{VERSION}_{TODAY}.md`. Rendering for other channels (chai-bot, browser, Word) is handled downstream from the Markdown.
 
 `--strict` makes assembly fail if `recommendations.json` breaks the writing rules (pre-built links, gendered pronouns, unknown feature keys, more than five decisions). If it fails, re-spawn the analysis agent with the reported problems and assemble again.
 

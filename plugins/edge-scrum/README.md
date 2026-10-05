@@ -88,7 +88,7 @@ Assesses whether the team can deliver planned scope within remaining time. Class
 
 **Pencils down** is when all feature code must be merged. **Branch cut** is when the release branch is created. Feature timeline risk is measured against pencils down. If `pd:` is omitted, it defaults to the branch cut sprint.
 
-**What it produces** (`.reports/release_planning_{version}_{date}.md`, `.docx` and `.html`; the `.html` opens automatically in your browser):
+**What it produces** (`.reports/release_planning_{version}_{date}.md`):
 
 1. **Verdict** — overall risk, pointed scope vs capacity, hidden (unpointed) scope as a range, gap
 2. **Decisions needed this week** — up to five rows with what it frees, an owner role and a deadline
@@ -101,4 +101,4 @@ Assesses whether the team can deliver planned scope within remaining time. Class
 
 The method, thresholds and known limitations are documented in [`references/release-planning-method.md`](references/release-planning-method.md).
 
-Output is saved to `.reports/release_planning_{version}_{YYYY-MM-DD}.md`, `.docx` and `.html` — a self-contained page that opens formatted in any browser. The skill runs with `--open`, so the `.html` opens automatically in your default browser when assembly finishes (drop `--open` when running headless).
+Output is saved to `.reports/release_planning_{version}_{YYYY-MM-DD}.md`.

@@ -1,6 +1,6 @@
 ---
 name: release-planning-analysis
-description: Write the decisions and narrative for a release planning risk assessment — reads pre-computed check results and produces a short, decision-oriented recommendations file
+description: Write the actionable recommendations and narrative for a release planning risk assessment — reads pre-computed check results and produces a short, decision-oriented recommendations file
 allowed-tools: Read, Write
 user-invocable: false
 ---
@@ -77,7 +77,7 @@ Write `{WORKDIR}/recommendations.json`:
 
 ### Writing Rules
 
-- **Decisions, not observations.** Each `decisions` row must be something a named role can decide by a named sprint event. "Alice is overloaded" is an observation; "Move OCPSTRAT-3105 (TNA quorum tuning) from Alice to Bob before S295 planning" is a decision. At most **five** rows; the table is the report's core, not a list of everything.
+- **Actionable recommendations, not observations.** Each `decisions` row must be something a named role can decide by a named sprint event. "Alice is overloaded" is an observation; "Move OCPSTRAT-3105 (TNA quorum tuning) from Alice to Bob before S295 planning" is a recommendation. At most **five** rows; the table is the report's core, not a list of everything.
 - **Lead with the biggest lever.** Read `cut_line` first. If features fall below the line, the first decision is usually a scope decision, not a rebalancing one — 158 SP cannot be closed by moving work between people.
 - **Name the feature.** Write `Name (KEY)` using `feature_names`, e.g. `Edge Tech Debt Backlog (OCPSTRAT-2788)`. Never a bare key without its name in a decision.
 - **Bare keys only.** Write `OCPSTRAT-2788`, never `[OCPSTRAT-2788](url)`. The assembler links keys; pre-linking creates broken nested links. The assembler warns on pre-built links, and under `--strict` (how the skill runs it) rejects the file.

@@ -13,7 +13,7 @@ _mod = import_module("run-checks")
 _jt = import_module("_jira_transforms")
 
 
-def _story(key="OCPEDGE-1", assignee="alice@x.com", sp=5, epic_key="E-1", status="To Do",
+def _story(key="OCPEDGE-1", assignee="alice@example.com", sp=5, epic_key="E-1", status="To Do",
            issue_type="Story", updated=None, sprints=None):
     return {
         "key": key, "summary": key, "type": issue_type, "status": status,
@@ -111,16 +111,16 @@ class TestCapacityPopulation(unittest.TestCase):
     def test_idle_roster_members_contribute_capacity(self):
         f = _feature(stories=[_story(sp=10)])
         gate = [{"feature_key": f["key"], "status": "PASS"}]
-        roster = _roster(("alice@x.com", "Alice", 8), ("bob@x.com", "Bob", 8))
+        roster = _roster(("alice@example.com", "Alice", 8), ("bob@x.com", "Bob", 8))
         result = _mod.run_capacity_check([f], gate, roster, 2)
         total = sum(c["remaining_capacity"] for c in result if c["in_roster"])
         assert total == 32
-        assert {c["person"] for c in result} == {"alice@x.com", "bob@x.com"}
+        assert {c["person"] for c in result} == {"alice@example.com", "bob@x.com"}
 
     def test_non_roster_person_has_zero_capacity_and_is_flagged(self):
         f = _feature(stories=[_story(assignee="ghost@x.com", sp=20)])
         gate = [{"feature_key": f["key"], "status": "PASS"}]
-        roster = _roster(("alice@x.com", "Alice", 8))
+        roster = _roster(("alice@example.com", "Alice", 8))
         result = _mod.run_capacity_check([f], gate, roster, 2)
         ghost = next(c for c in result if c["person"] == "ghost@x.com")
         assert ghost["in_roster"] is False
@@ -131,7 +131,7 @@ class TestCapacityPopulation(unittest.TestCase):
     def test_unpointed_assigned_counted_separately(self):
         f = _feature(stories=[_story("S-1", sp=5), _story("S-2", sp=0), _story("S-3", sp=0)])
         gate = [{"feature_key": f["key"], "status": "PASS"}]
-        result = _mod.run_capacity_check([f], gate, _roster(("alice@x.com", "Alice", 8)), 2)
+        result = _mod.run_capacity_check([f], gate, _roster(("alice@example.com", "Alice", 8)), 2)
         assert result[0]["assigned_sp"] == 5
         assert result[0]["unpointed_assigned"] == 2
 
@@ -175,7 +175,7 @@ class TestSizingIndependence(unittest.TestCase):
         f1 = _feature("F-1", size="S", stories=[_story("S-1", sp=8)])
         f2 = _feature("F-2", size="L", stories=[_story("S-2", sp=80, epic_key="E-2")], epics=[{"key": "E-2"}])
         gate = [{"feature_key": "F-1", "status": "PASS"}, {"feature_key": "F-2", "status": "PASS"}]
-        roster = _roster(("alice@x.com", "Alice", 8))
+        roster = _roster(("alice@example.com", "Alice", 8))
         tl = _mod.run_timeline_check([f1, f2], gate, roster, 2)
         sz = _mod.run_sizing_check([f1, f2], tl, roster)
         keys = {s["feature_key"]: s for s in sz}
@@ -211,7 +211,7 @@ class TestCutLine(unittest.TestCase):
 class TestHiddenScope(unittest.TestCase):
     def test_uses_closed_story_quartiles(self):
         closed = [_story(f"C-{i}", sp=sp, status="Closed") for i, sp in enumerate([1, 2, 3, 3, 5, 8, 2, 3])]
-        open_unpointed = [_story(f"U-{i}", sp=0, assignee="alice@x.com" if i < 2 else None) for i in range(4)]
+        open_unpointed = [_story(f"U-{i}", sp=0, assignee="alice@example.com" if i < 2 else None) for i in range(4)]
         f = _feature(stories=closed + open_unpointed)
         h = _mod.estimate_hidden_scope([f], {f["key"]})
         assert h["unpointed_open"] == 4
@@ -257,7 +257,7 @@ class TestReviewRegressions(unittest.TestCase):
     def test_non_roster_sole_owner_gives_no_velocity(self):
         f = _feature(stories=[_story(assignee="ghost@x.com", sp=10)])
         gate = [{"feature_key": f["key"], "status": "PASS"}]
-        tl = _mod.run_timeline_check([f], gate, _roster(("alice@x.com", "Alice", 8)), 2)
+        tl = _mod.run_timeline_check([f], gate, _roster(("alice@example.com", "Alice", 8)), 2)
         assert tl[0]["risk"] == "NO_CONTRIBUTORS"
         assert tl[0]["velocity_per_sprint"] == 0
 
