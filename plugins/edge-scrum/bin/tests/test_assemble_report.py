@@ -17,6 +17,7 @@ soft_warnings = _mod.soft_warnings
 GENDERED_RE = _mod.GENDERED_RE
 jira_linkify = _mod.jira_linkify
 build_blocks = _mod.build_blocks
+VERSION_RE = _mod.VERSION_RE
 
 CHECKS = {"feature_names": {"OCPSTRAT-1": "Feature one", "OCPSTRAT-2": "Feature two"}}
 
@@ -318,6 +319,19 @@ class TestNormalizeRecs(unittest.TestCase):
         recs["per_feature"] = None
         blocks = build_blocks(_synthetic_checks(), _mod.normalize_recs(recs), _synthetic_params())
         assert isinstance(blocks, dict)
+
+
+
+class TestVersionArg(unittest.TestCase):
+    """--version is allow-listed at the trust boundary; it flows into Markdown unescaped."""
+
+    def test_accepts_valid_versions(self):
+        for v in ("5.1", "5.1.0", "5.1.z"):
+            self.assertIsNotNone(VERSION_RE.fullmatch(v), f"{v!r} should be accepted")
+
+    def test_rejects_invalid_versions(self):
+        for v in ("5", "5.1.1.1", "v5.1", "5.1<b>", ""):
+            self.assertIsNone(VERSION_RE.fullmatch(v), f"{v!r} should be rejected")
 
 
 if __name__ == "__main__":

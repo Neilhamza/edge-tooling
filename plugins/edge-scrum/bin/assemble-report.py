@@ -23,6 +23,10 @@ JIRA_BASE = "https://redhat.atlassian.net/browse"
 JIRA_KEY_RE = re.compile(r"(?<!\[)(?<!/)\b(OCPSTRAT-\d+|OCPEDGE-\d+|USHIFT-\d+|OCPBUGS-\d+)\b(?!\])")
 GENDERED_RE = re.compile(r"\b(he|she|him|her|his|hers|himself|herself)\b", re.IGNORECASE)
 
+# --version flows into the Markdown output unescaped; validate it at the trust
+# boundary with this allow-list so the output can't carry injected markup.
+VERSION_RE = re.compile(r"\d+\.\d+(?:\.\d+|\.z)?")
+
 RISK_GLYPH = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢", "N/A": "⚪"}
 FITS_GLYPH = {"fits": "✅", "partial": "⚠️ partial", "over": "❌"}
 METHOD_DOC = "plugins/edge-scrum/references/release-planning-method.md"
@@ -512,9 +516,7 @@ def main():
     parser.add_argument("--strict", action="store_true", help="Fail if recommendations.json violates the writing rules")
     args = parser.parse_args()
 
-    # --version flows into the Markdown output unescaped; validate it at the trust
-    # boundary with an allow-list so the output can't carry injected markup.
-    if not re.fullmatch(r"\d+\.\d+(?:\.\d+|\.z)?", str(args.version)):
+    if not VERSION_RE.fullmatch(str(args.version)):
         parser.error(f"--version must look like 5.1, 5.1.0 or 5.1.z, got {args.version!r}")
 
     checks = load_json(args.checks)
