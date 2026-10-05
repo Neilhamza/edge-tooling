@@ -94,7 +94,7 @@ Assesses whether the team can deliver planned scope within remaining time. Class
 2. **Decisions needed this week** — up to five rows with what it frees, an owner role and a deadline
 3. **Where the cut line falls** — active features in PM rank order with cumulative SP against capacity
 4. **People over target** — assigned vs capacity, unpointed work shown separately, roster drift flagged
-5. **Scope nobody has started** — features still in New with no evidence of work, with the reason
+5. **Not started (focus priorities)** — Blocker/Critical/Major features still in New with no evidence of work; lower priorities are listed in the appendix only
 6. **Process gaps** — roster drift, just-in-time pointing, missing SMEs, sizing, excluded epics
 7. **How the numbers are computed** — formula, inputs and result for every headline figure
 8. **Appendix** (collapsible) — full composite, timeline, capacity, data-quality, assignment, bug-load and sizing tables

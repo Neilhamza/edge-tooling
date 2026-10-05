@@ -22,6 +22,12 @@ Before anything is counted, the tool decides which work belongs to this release.
 
 If an excluded epic's version tag disagrees with its parent feature, fix the tag in Jira and re-run; the tool never aliases versions. A version alias (`5.1 = 4.22`) would encode a mapping the data itself can contradict — the same tag can sit on both finished and carry-over work — so the correct fix is the field, not a CLI flag. Open SP under a mistagged epic is surfaced in the verdict line as "pending version confirmation" so it is not lost while the tag is corrected.
 
+### Priority focus
+
+**Only focus-priority features are assessed.** A feature is assessed when its priority is in the focus set — `Blocker`, `Critical`, `Major` by default (`--focus-priorities`) — or when its status is in the include-lower set — `Refinement` by default (`--include-lower-when`). Every other feature is **deprioritized**: listed in the appendix's "Lower-priority features (not assessed)" table and excluded from every figure (capacity, scope, gap, cut line, timeline, sizing, active/dormant). A feature with no priority set counts as `Undefined`, which is below the focus set and so deprioritized.
+
+The team works priority-first: lower-priority features that have not started yet are following the plan, not slipping. Counting their not-started scope as risk drowns the signal from the Blocker/Critical/Major work that actually gates the release. The two flags let a planner widen focus (e.g. add `Normal`) or change which status pulls lower-priority work in, without touching code.
+
 **Features are classified active or dormant.** Law 05 says a feature in `New` is not a commitment. A feature is **dormant** only if:
 
 ```text

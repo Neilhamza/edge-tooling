@@ -19,7 +19,7 @@
 
 {PEOPLE}
 
-## Scope nobody has started
+## Not started (focus priorities)
 
 {DORMANT}
 

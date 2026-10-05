@@ -342,8 +342,12 @@ python3 plugins/edge-scrum/bin/run-checks.py \
   --today {TODAY} \
   --first-sprint {FIRST} \
   --pencils-down {PENCILS_DOWN} \
+  --focus-priorities Blocker,Critical,Major \
+  --include-lower-when Refinement \
   --output {WORKDIR}/checks.json
 ```
+
+Lower-priority features are excluded from all figures and listed in the appendix; adjust the two flags to widen or narrow focus.
 
 Verify `{WORKDIR}/checks.json` was written and contains `meta` and `method` keys.
 

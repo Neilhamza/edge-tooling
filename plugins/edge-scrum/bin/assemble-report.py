@@ -145,7 +145,8 @@ def build_blocks(checks, recs, params):
         f"{plural(meta['active_features'], 'active feature')} · {meta['dormant_features']} dormant · "
         f"{plural(meta['overloaded_people_count'], 'person', 'people')} over target · "
         f"{plural(meta['spof_features_count'], 'single-owner feature')} · "
-        f"{meta['high_risk_count']} HIGH / {meta['medium_risk_count']} MEDIUM / {meta['low_risk_count']} LOW"
+        f"{meta['high_risk_count']} HIGH / {meta['medium_risk_count']} MEDIUM / {meta['low_risk_count']} LOW · "
+        f"{meta.get('deprioritized_features', 0)} lower-priority not assessed"
     )}]
 
     # Decisions
@@ -237,6 +238,9 @@ def build_blocks(checks, recs, params):
             sme_note = f" {no_sme} of them have no SME." if no_sme else ""
         text = (lead + sme_note
                 + " Confirm as *deferred* or *committed*; anything committed needs epics and stories before the next planning.")
+        if meta.get("deprioritized_features", 0):
+            text += (" Lower-priority features are not listed here — not starting them yet is by design"
+                     " under the priority-first approach; see the appendix.")
         d_blocks = [{"t": "p", "text": text}]
         for line in recs.get("scope_decisions", [])[:3]:
             d_blocks.append({"t": "bullets", "items": [line]})
@@ -347,6 +351,13 @@ def build_blocks(checks, recs, params):
         app.append({"t": "h3", "text": "Epics excluded from scope"})
         app.append({"t": "table", "headers": ["Feature", "Epic", "Status", "Open SP", "Why"],
                     "rows": [[feature_label(names, e["feature_key"]), e["key"], e["status"], str(e["open_sp"]), e["reason"]] for e in ex]})
+
+    depri = checks.get("deprioritized", [])
+    if depri:
+        app.append({"t": "h3", "text": "Lower-priority features (not assessed)"})
+        app.append({"t": "table", "headers": ["Feature", "Priority", "Status", "SME", "Epics", "Open SP"],
+                    "rows": [[feature_label(names, d["feature_key"]), d["priority"], d["status"],
+                              sme_or_dash(d["sme"]), str(d["epic_count"]), str(d["open_sp"])] for d in depri]})
 
     if recs.get("per_feature") or recs.get("per_person"):
         app.append({"t": "h3", "text": "Detailed recommendations"})

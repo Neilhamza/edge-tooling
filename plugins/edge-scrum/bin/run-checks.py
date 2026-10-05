@@ -22,6 +22,12 @@ DONE_STATUSES_EPICS = {"Closed", "Dev Complete"}
 ACTIVE_STORY_STATUSES = {"In Progress", "Review"}
 NEW_FEATURE_STATUSES = {"New"}
 
+# Priority focus: only these feature priorities are assessed by default; lower
+# priorities are assessed only when their status is in the include set (the team
+# works priority-first, so not-yet-started lower-priority work is by design, not risk).
+FOCUS_PRIORITIES = {"Blocker", "Critical", "Major"}
+LOWER_PRIORITY_INCLUDE_STATUSES = {"Refinement"}
+
 # Law 05: XS ~2 dev sprints, S ~2-3, M ~3-4, L ~4+, XL ~5 (entire release).
 SIZE_TO_MAX_SPRINTS = {"XS": 2, "S": 3, "M": 4, "L": 5, "XL": 5}
 DEFAULT_SP_TARGET = 8
@@ -146,6 +152,7 @@ def build_hierarchy(features, epics, stories, bugs, component_filter, version=No
             "key": fkey,
             "summary": f.get("summary", ""),
             "status": f.get("status", ""),
+            "priority": f.get("priority", "Undefined"),
             "size": f.get("size", "Unsized"),
             "sme": f.get("sme", "None"),
             "type": f.get("type", "Feature"),
@@ -244,6 +251,24 @@ def split_features(features, today=None, activity_days=DEFAULT_ACTIVITY_DAYS, wi
         f["classification_reason"] = reason
         (active if cls == "active" else dormant).append(f)
     return active, dormant
+
+
+def partition_by_priority(features, focus=FOCUS_PRIORITIES, include_statuses=LOWER_PRIORITY_INCLUDE_STATUSES):
+    """Split features into (in_focus, deprioritized) by feature priority.
+
+    A feature is in focus if its priority is in ``focus`` or its status is in
+    ``include_statuses`` (e.g. Refinement). Everything else — including features
+    with an Undefined priority — is deprioritized: listed in the appendix and
+    excluded from every figure. The team works priority-first, so not-yet-started
+    lower-priority work is a plan, not a risk.
+    """
+    in_focus, deprioritized = [], []
+    for f in features:
+        if f.get("priority", "Undefined") in focus or f.get("status", "") in include_statuses:
+            in_focus.append(f)
+        else:
+            deprioritized.append(f)
+    return in_focus, deprioritized
 
 
 # --- Data Quality Gate ---
@@ -870,6 +895,14 @@ def build_method(meta, roster, remaining_sprints, hidden, activity_days, window,
                         f"({meta['gap_with_hidden_low']} to {meta['gap_with_hidden_high']} incl. hidden)",
         },
         {
+            "id": "priority_focus",
+            "label": "Priority focus",
+            "formula": f"features with priority in {meta['focus_priorities']} are assessed; lower priorities only if status in {meta['include_lower_when']}; the rest are listed in the appendix and excluded from every figure",
+            "inputs": {"focus_priorities": meta["focus_priorities"], "include_lower_when": meta["include_lower_when"]},
+            "result": f"{meta['focus_features']} assessed · {meta['deprioritized_features']} lower-priority not assessed",
+            "shown_as": f"{meta['focus_features']} assessed · {meta['deprioritized_features']} lower-priority not assessed",
+        },
+        {
             "id": "dormant",
             "label": "Active / dormant",
             "formula": f"dormant = status New AND (no epics OR no stories OR no story in progress / done / in a {win} sprint / updated within {activity_days} days)",
@@ -950,8 +983,15 @@ def main():
     parser.add_argument("--first-sprint", type=int, default=None)
     parser.add_argument("--pencils-down", type=int, default=None)
     parser.add_argument("--activity-days", type=int, default=DEFAULT_ACTIVITY_DAYS)
+    parser.add_argument("--focus-priorities", default=",".join(sorted(FOCUS_PRIORITIES)),
+                        help="CSV of feature priorities to assess (default: Blocker,Critical,Major)")
+    parser.add_argument("--include-lower-when", default=",".join(sorted(LOWER_PRIORITY_INCLUDE_STATUSES)),
+                        help="CSV of statuses that pull a lower-priority feature into focus (default: Refinement)")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
+
+    focus_priorities = {p.strip() for p in args.focus_priorities.split(",") if p.strip()}
+    include_lower_when = {s.strip() for s in args.include_lower_when.split(",") if s.strip()}
 
     features_data = load_json(args.features)
     epics_data = load_json(args.epics)
@@ -967,9 +1007,13 @@ def main():
     features, unlinked_bugs = build_hierarchy(
         features_data, epics_data, stories_data, bugs_data, args.component_filter, version=args.version
     )
-    active, dormant = split_features(features, args.today, args.activity_days, window)
+    # Priority focus: assess Blocker/Critical/Major (plus any in Refinement) and set
+    # the rest aside — they go in the appendix and out of every figure.
+    in_focus, deprioritized = partition_by_priority(features, focus_priorities, include_lower_when)
+    active, dormant = split_features(in_focus, args.today, args.activity_days, window)
     active_keys = {f["key"] for f in active}
 
+    # Bug load is assessed across every bug, regardless of feature priority focus.
     all_epic_stories = []
     for f in features:
         all_epic_stories.extend(f["all_stories"])
@@ -982,7 +1026,7 @@ def main():
     bug_load = run_bug_load_check(unlinked_bugs, all_epic_stories, args.component_filter)
     sizing = run_sizing_check(active, timeline, roster)
     composite = run_composite_check(active, gate, capacity, timeline, assignment, sizing)
-    hidden = estimate_hidden_scope(features, active_keys)
+    hidden = estimate_hidden_scope(in_focus, active_keys)
 
     unknown_contributors = [c["person"] for c in capacity if not c["in_roster"]]
 
@@ -1000,7 +1044,11 @@ def main():
     total_remaining = sum(t["remaining_sp"] for t in timeline if t["risk"] != "N/A")
     total_capacity = sum(c["remaining_capacity"] for c in capacity if c["in_roster"])
     gap = total_capacity - total_remaining
-    excluded = [e for f in features for e in f.get("excluded_epics", [])]
+    excluded = [e for f in in_focus for e in f.get("excluded_epics", [])]
+    deprioritized_open_sp = sum(
+        s["sp"] for f in deprioritized for s in f["all_stories"]
+        if not is_story_done(s) and s["type"] != "Bug"
+    )
 
     overall = "HIGH" if high_count > 0 else ("MEDIUM" if med_count > 0 else "LOW")
 
@@ -1008,6 +1056,11 @@ def main():
         "version": args.version,
         "today": args.today,
         "total_features": len(features),
+        "focus_features": len(in_focus),
+        "deprioritized_features": len(deprioritized),
+        "deprioritized_open_sp": deprioritized_open_sp,
+        "focus_priorities": sorted(focus_priorities),
+        "include_lower_when": sorted(include_lower_when),
         "active_features": len(active),
         "dormant_features": len(dormant),
         "assessed_features": assessed,
@@ -1062,8 +1115,14 @@ def main():
              "story_count": sum(1 for s in f["all_stories"] if s["type"] != "Bug"),
              "reason": f["classification_reason"]} for f in dormant
         ],
+        "deprioritized": [
+            {"feature_key": f["key"], "summary": f["summary"], "priority": f.get("priority", "Undefined"),
+             "status": f["status"], "sme": f.get("sme", "None"), "epic_count": len(f["epics"]),
+             "open_sp": sum(s["sp"] for s in f["all_stories"] if not is_story_done(s) and s["type"] != "Bug")}
+            for f in sorted(deprioritized, key=lambda x: x["rank"] if x.get("rank") is not None else float("inf"))
+        ],
         "feature_names": {f["key"]: f["summary"] for f in features},
-        "process_gaps": build_process_gaps(features, active, dormant, capacity, sizing, hidden),
+        "process_gaps": build_process_gaps(in_focus, active, dormant, capacity, sizing, hidden),
         "unknown_contributors": unknown_contributors,
         "skipped_issues": stories_skipped + bugs_skipped,
     }

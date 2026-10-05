@@ -58,6 +58,7 @@ def transform_feature(raw, rank=None):
         "labels": raw.get("labels", []),
         "target_versions": extract_version_names(raw.get("customfield_10855")),
         "fix_versions": extract_version_names(raw.get("fixVersions") or raw.get("fix_versions")),
+        "priority": get_nested(raw, "priority", "name") or "Undefined",
     }
 
 

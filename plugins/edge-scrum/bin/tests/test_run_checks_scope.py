@@ -23,9 +23,11 @@ def _story(key="OCPEDGE-1", assignee="alice@example.com", sp=5, epic_key="E-1", 
     }
 
 
-def _feature(key="OCPSTRAT-1", status="In Progress", size="M", epics=None, stories=None, rank=None, sme="None"):
+def _feature(key="OCPSTRAT-1", status="In Progress", size="M", epics=None, stories=None, rank=None,
+             sme="None", priority="Major"):
     return {"key": key, "summary": f"Feature {key}", "status": status, "size": size, "sme": sme,
-            "type": "Feature", "rank": rank, "epics": epics if epics is not None else [{"key": "E-1"}],
+            "type": "Feature", "rank": rank, "priority": priority,
+            "epics": epics if epics is not None else [{"key": "E-1"}],
             "all_stories": stories or [], "excluded_epics": []}
 
 
@@ -236,15 +238,18 @@ class TestMethodBlock(unittest.TestCase):
         meta = {k: 0 for k in (
             "total_capacity_sp", "active_features", "assessed_features", "total_remaining_sp", "gap_sp",
             "gap_with_hidden_low", "gap_with_hidden_high", "dormant_features", "total_features",
+            "focus_features", "deprioritized_features",
             "overloaded_people_count", "non_roster_people_count", "timeline_high_count", "undersized_count",
             "high_risk_count", "medium_risk_count", "low_risk_count", "excluded_epics_count", "excluded_open_sp",
             "dq_pass", "dq_warn", "dq_fail")}
+        meta["focus_priorities"] = ["Blocker", "Critical", "Major"]
+        meta["include_lower_when"] = ["Refinement"]
         hidden = {"unpointed_open": 0, "unpointed_assigned": 0, "sp_per_story_low": 2, "sp_per_story_typical": 3,
                   "sp_per_story_high": 5, "estimate_low": 0, "estimate_typical": 0, "estimate_high": 0, "basis": "x"}
         method = _mod.build_method(meta, _roster(("a", "A", 8)), 2, hidden, 30, (293, 296), "5.1")
         ids = [m["id"] for m in method]
-        assert ids == ["capacity", "scope", "hidden_scope", "gap", "dormant", "overload", "timeline",
-                       "sizing", "data_quality", "composite", "scope_filter"]
+        assert ids == ["capacity", "scope", "hidden_scope", "gap", "priority_focus", "dormant", "overload",
+                       "timeline", "sizing", "data_quality", "composite", "scope_filter"]
         for m in method:
             for k in ("label", "formula", "inputs", "result", "shown_as"):
                 assert k in m and m[k] not in (None, ""), (m["id"], k)
@@ -377,6 +382,48 @@ class TestCutLineTimelineRisk(unittest.TestCase):
         tl = [{"feature_key": "A", "summary": "A", "rank": 1, "remaining_sp": 10, "risk": "HIGH"}]
         rows = _mod.build_cut_line(tl, capacity_sp=100)
         assert rows[0]["timeline_risk"] == "HIGH"
+
+
+class TestPriorityFocus(unittest.TestCase):
+    """partition_by_priority: assess focus priorities (plus Refinement); set the rest aside."""
+
+    def test_focus_priority_new_feature_is_in_focus(self):
+        f = _feature(priority="Major", status="New")
+        in_focus, depri = _mod.partition_by_priority([f])
+        assert in_focus == [f] and depri == []
+
+    def test_lower_priority_new_feature_is_deprioritized(self):
+        f = _feature(priority="Normal", status="New")
+        in_focus, depri = _mod.partition_by_priority([f])
+        assert in_focus == [] and depri == [f]
+
+    def test_lower_priority_in_refinement_is_in_focus(self):
+        f = _feature(priority="Normal", status="Refinement")
+        in_focus, depri = _mod.partition_by_priority([f])
+        assert in_focus == [f] and depri == []
+
+    def test_undefined_priority_is_deprioritized(self):
+        f = _feature(priority="Undefined", status="New")
+        in_focus, depri = _mod.partition_by_priority([f])
+        assert depri == [f]
+
+    def test_custom_focus_set_is_honoured(self):
+        f = _feature(priority="Normal", status="New")
+        in_focus, depri = _mod.partition_by_priority([f], focus={"Normal"}, include_statuses=set())
+        assert in_focus == [f] and depri == []
+
+    def test_deprioritized_open_sp_sums_only_open_non_bug(self):
+        # One open pointed story (counts), one closed story (excluded), one open bug (excluded).
+        stories = [
+            _story("S-1", sp=5, status="To Do"),
+            _story("S-2", sp=8, status="Closed"),
+            _story("B-1", sp=3, status="To Do", issue_type="Bug"),
+        ]
+        f = _feature(priority="Normal", status="New", stories=stories)
+        _, depri = _mod.partition_by_priority([f])
+        open_sp = sum(s["sp"] for g in depri for s in g["all_stories"]
+                      if not _mod.is_story_done(s) and s["type"] != "Bug")
+        assert open_sp == 5
 
 
 if __name__ == "__main__":
