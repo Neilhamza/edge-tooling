@@ -204,9 +204,16 @@ def _check_gh_auth():
             "reason": "gh CLI not found. Install and authenticate the gh CLI.",
         }
 
-    result = subprocess.run(
-        ["gh", "auth", "status"], capture_output=True, text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "status"], capture_output=True, text=True, timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "check": "gh_auth",
+            "status": "FAIL",
+            "reason": "gh authentication check timed out after 30 seconds.",
+        }
     if result.returncode != 0:
         return {
             "check": "gh_auth",
@@ -241,11 +248,24 @@ def _check_aws_auth():
             ),
         }
 
-    # Set is not the same as usable — keys rotate and profiles go stale.
-    result = subprocess.run(
-        ["aws", "sts", "get-caller-identity"],
-        capture_output=True, text=True, timeout=30,
-    )
+    if not shutil.which("aws"):
+        return {
+            "check": "aws_auth",
+            "status": "FAIL",
+            "reason": "aws CLI not found. Install the AWS CLI.",
+        }
+
+    try:
+        result = subprocess.run(
+            ["aws", "sts", "get-caller-identity"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "check": "aws_auth",
+            "status": "FAIL",
+            "reason": "AWS authentication check timed out after 30 seconds.",
+        }
     if result.returncode != 0:
         return {
             "check": "aws_auth",
@@ -282,10 +302,20 @@ def _check_gsutil_auth():
     # check must work regardless of which bucket those point at, since its
     # whole purpose is verifying anonymous-capable access to the known-public
     # bucket specifically.
-    result = subprocess.run(
-        ["gsutil", "ls", "gs://test-platform-results-public/"],
-        capture_output=True, text=True, timeout=30,
-    )
+    try:
+        result = subprocess.run(
+            ["gsutil", "ls", "gs://test-platform-results-public/"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "check": "gsutil_auth",
+            "status": "WARN",
+            "reason": (
+                "gsutil authentication check timed out after 30 seconds. "
+                "Needed later for the 'download' step."
+            ),
+        }
     if result.returncode != 0:
         return {
             "check": "gsutil_auth",
