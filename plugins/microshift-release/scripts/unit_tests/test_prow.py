@@ -287,14 +287,23 @@ class TestCheckAwsAuth(unittest.TestCase):
         self.assertEqual(result["status"], "PASS")
         self._assert_sts_called(mock_which, mock_run)
 
-    def test_profile_with_incomplete_key_pair_passes(self):
-        for key in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
-            with self.subTest(key=key):
-                result, mock_which, mock_run = self._run({
-                    "AWS_PROFILE": "mock-profile", key: "mock-key",
-                })
-                self.assertEqual(result["status"], "PASS")
-                self._assert_sts_called(mock_which, mock_run)
+    def test_profile_with_access_key_without_secret_fails(self):
+        result, mock_which, mock_run = self._run({
+            "AWS_PROFILE": "mock-profile",
+            "AWS_ACCESS_KEY_ID": "mock-access-key",
+        }, sts_rc=255)
+        self.assertEqual(result["check"], "aws_auth")
+        self.assertEqual(result["status"], "FAIL")
+        self._assert_sts_called(mock_which, mock_run)
+
+    def test_profile_with_secret_without_access_key_passes(self):
+        result, mock_which, mock_run = self._run({
+            "AWS_PROFILE": "mock-profile",
+            "AWS_SECRET_ACCESS_KEY": "mock-secret-key",
+        })
+        self.assertEqual(result["check"], "aws_auth")
+        self.assertEqual(result["status"], "PASS")
+        self._assert_sts_called(mock_which, mock_run)
 
     def test_missing_cli_fails(self):
         result, mock_which, mock_run = self._run(
