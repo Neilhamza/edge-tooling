@@ -223,46 +223,41 @@ def _check_gh_auth():
 
 
 def _check_aws_auth():
-    """Check that an AWS profile/credentials are configured.
+    """Require AWS credentials in the environment before preflight runs.
 
-    Needed by this preflight check itself (s3_rpms) and later by `upload`.
-    A missing AWS_PROFILE/credentials makes bare `aws` calls fail with a
-    generic "Unable to locate credentials" error deep inside s3_rpms — this
-    check surfaces that clearly, up front, instead.
+    s3_rpms here, and `upload` later, shell out to bare `aws`. With nothing
+    exported those fail with a generic "Unable to locate credentials" from
+    deep inside s3_rpms; this fails fast instead.
     """
-    if not shutil.which("aws"):
+    if not (os.environ.get("AWS_PROFILE") or (
+            os.environ.get("AWS_ACCESS_KEY_ID")
+            and os.environ.get("AWS_SECRET_ACCESS_KEY"))):
         return {
             "check": "aws_auth",
             "status": "FAIL",
-            "reason": "aws CLI not found. Install and configure the AWS CLI.",
-        }
-
-    if not (os.environ.get("AWS_PROFILE") or os.environ.get("AWS_ACCESS_KEY_ID")):
-        return {
-            "check": "aws_auth",
-            "status": "WARN",
             "reason": (
-                "No AWS_PROFILE or AWS_ACCESS_KEY_ID set, and no [default] "
-                "profile is guaranteed. Export AWS_PROFILE=<profile> if "
-                "s3_rpms/upload fail with 'Unable to locate credentials'."
+                "No AWS credentials set. Export AWS_ACCESS_KEY_ID and "
+                "AWS_SECRET_ACCESS_KEY, or AWS_PROFILE=<profile>."
             ),
         }
 
+    # Set is not the same as usable — keys rotate and profiles go stale.
     result = subprocess.run(
-        ["aws", "sts", "get-caller-identity"], capture_output=True, text=True,
+        ["aws", "sts", "get-caller-identity"],
+        capture_output=True, text=True, timeout=30,
     )
     if result.returncode != 0:
         return {
             "check": "aws_auth",
             "status": "FAIL",
-            "reason": "AWS credentials are configured but invalid/expired.",
-            "details": [result.stderr.strip()],
+            "reason": "AWS credentials are set but rejected — likely expired.",
+            "details": [result.stderr.strip().splitlines()[-1] if result.stderr.strip() else ""],
         }
 
     return {
         "check": "aws_auth",
         "status": "PASS",
-        "reason": "AWS credentials are valid",
+        "reason": "AWS credentials valid",
     }
 
 

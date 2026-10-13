@@ -1,8 +1,10 @@
 """Unit tests for lib.prow module."""
 
+import os
 import unittest
 from unittest import mock
 
+import prow_testing
 from lib import prow
 
 
@@ -223,6 +225,27 @@ class TestFetchAllJobStatusesOverride(unittest.TestCase):
         statuses = prow.fetch_all_job_statuses(1234, matched, "4.22")
         release_status = next(s for s in statuses if s["short_name"] == "e2e-aws-tests-release")
         self.assertEqual(release_status["status"], "SUCCESS")
+
+
+class TestCheckAwsAuth(unittest.TestCase):
+
+    def _run(self, env, sts_rc=0):
+        with mock.patch.dict(os.environ, env, clear=True), \
+             mock.patch.object(prow_testing.subprocess, "run",
+                               return_value=mock.Mock(returncode=sts_rc,
+                                                      stderr="")):
+            return prow_testing._check_aws_auth()
+
+    def test_no_credentials_fails(self):
+        self.assertEqual(self._run({})["status"], "FAIL")
+
+    def test_credentials_pass(self):
+        self.assertEqual(
+            self._run({"AWS_PROFILE": "microshift-dev"})["status"], "PASS")
+
+    def test_expired_credentials_fail(self):
+        self.assertEqual(
+            self._run({"AWS_PROFILE": "stale"}, sts_rc=255)["status"], "FAIL")
 
 
 if __name__ == "__main__":
