@@ -18,6 +18,11 @@ _AUTH_DIAGNOSTIC_SENTINELS = (
     "synthetic-host.example.invalid",
 )
 _AUTH_DIAGNOSTICS = "\n".join(_AUTH_DIAGNOSTIC_SENTINELS)
+_AUTH_COMMANDS = {
+    "gh": ["gh", "auth", "status"],
+    "aws": ["aws", "sts", "get-caller-identity"],
+    "gsutil": ["gsutil", "ls", "gs://test-platform-results-public/"],
+}
 
 
 class TestParseVersion(unittest.TestCase):
@@ -239,313 +244,118 @@ class TestFetchAllJobStatusesOverride(unittest.TestCase):
         self.assertEqual(release_status["status"], "SUCCESS")
 
 
-class TestCheckAwsAuth(unittest.TestCase):
+class TestAuthChecks(unittest.TestCase):
 
-    def _run(self, env, sts_rc=0, binary="/mock/bin/aws", timeout=False):
-        with mock.patch.dict(os.environ, env, clear=True), \
+    def _auth(self, binary, env=None, missing=False, returncode=0, timeout=False):
+        credentials = {"AWS_PROFILE": "mock-profile"} if env is None else env
+        with mock.patch.dict(os.environ, credentials, clear=True), \
              mock.patch.object(prow_testing.shutil, "which",
-                               return_value=binary) as mock_which, \
-             mock.patch.object(prow_testing.subprocess, "run",
-                               return_value=mock.Mock(returncode=sts_rc,
-                                                      stderr="")) as mock_run:
+                               return_value=None if missing else "/mock/bin/tool") as lookup, \
+             mock.patch.object(prow_testing.subprocess, "run", return_value=mock.Mock(
+                 returncode=returncode, stdout=_AUTH_DIAGNOSTICS, stderr=_AUTH_DIAGNOSTICS,
+             )) as run:
             if timeout:
-                mock_run.side_effect = subprocess.TimeoutExpired(
-                    "aws", 30, output=_AUTH_DIAGNOSTICS,
-                    stderr=_AUTH_DIAGNOSTICS,
-                )
-            result = prow_testing._check_aws_auth()
-        return result, mock_which, mock_run
-
-    def _assert_sts_called(self, mock_which, mock_run):
-        mock_which.assert_called_once_with("aws")
-        mock_run.assert_called_once_with(
-            ["aws", "sts", "get-caller-identity"],
-            capture_output=True, text=True, timeout=30,
-        )
-
-    def test_no_credentials_fails(self):
-        result, mock_which, mock_run = self._run({}, binary=None)
-        self.assertEqual(result["check"], "aws_auth")
-        self.assertEqual(result["status"], "FAIL")
-        self.assertIn("No AWS credentials", result["reason"])
-        mock_which.assert_not_called()
-        mock_run.assert_not_called()
-
-    def test_incomplete_key_pairs_fail(self):
-        for env in ({"AWS_ACCESS_KEY_ID": "mock-access-key"},
-                    {"AWS_SECRET_ACCESS_KEY": "mock-secret-key"}):
-            with self.subTest(env_keys=list(env)):
-                result, mock_which, mock_run = self._run(env)
-                self.assertEqual(result["status"], "FAIL")
-                self.assertIn("No AWS credentials", result["reason"])
-                mock_which.assert_not_called()
-                mock_run.assert_not_called()
-
-    def test_profile_passes(self):
-        result, mock_which, mock_run = self._run({"AWS_PROFILE": "mock-profile"})
-        self.assertEqual(result["check"], "aws_auth")
-        self.assertEqual(result["status"], "PASS")
-        self._assert_sts_called(mock_which, mock_run)
-
-    def test_complete_key_pair_passes(self):
-        result, mock_which, mock_run = self._run({
-            "AWS_ACCESS_KEY_ID": "mock-access-key",
-            "AWS_SECRET_ACCESS_KEY": "mock-secret-key",
-        })
-        self.assertEqual(result["status"], "PASS")
-        self._assert_sts_called(mock_which, mock_run)
-
-    def test_profile_with_access_key_without_secret_fails(self):
-        result, mock_which, mock_run = self._run({
-            "AWS_PROFILE": "mock-profile",
-            "AWS_ACCESS_KEY_ID": "mock-access-key",
-        }, sts_rc=255)
-        self.assertEqual(result["check"], "aws_auth")
-        self.assertEqual(result["status"], "FAIL")
-        self._assert_sts_called(mock_which, mock_run)
-
-    def test_profile_with_secret_without_access_key_passes(self):
-        result, mock_which, mock_run = self._run({
-            "AWS_PROFILE": "mock-profile",
-            "AWS_SECRET_ACCESS_KEY": "mock-secret-key",
-        })
-        self.assertEqual(result["check"], "aws_auth")
-        self.assertEqual(result["status"], "PASS")
-        self._assert_sts_called(mock_which, mock_run)
-
-    def test_missing_cli_fails(self):
-        result, mock_which, mock_run = self._run(
-            {"AWS_PROFILE": "mock-profile"}, binary=None,
-        )
-        self.assertEqual(result["check"], "aws_auth")
-        self.assertEqual(result["status"], "FAIL")
-        self.assertIn("aws CLI not found", result["reason"])
-        mock_which.assert_called_once_with("aws")
-        mock_run.assert_not_called()
-
-    def test_expired_credentials_fail(self):
-        result, mock_which, mock_run = self._run(
-            {"AWS_PROFILE": "mock-profile"}, sts_rc=255,
-        )
-        self.assertEqual(result["status"], "FAIL")
-        self._assert_sts_called(mock_which, mock_run)
-
-    def test_timeout_fails_without_diagnostics(self):
-        result, mock_which, mock_run = self._run(
-            {"AWS_PROFILE": "mock-profile"}, timeout=True,
-        )
-        self.assertEqual(result, {
-            "check": "aws_auth",
-            "status": "FAIL",
-            "reason": "AWS authentication check timed out after 30 seconds.",
-        })
-        self._assert_sts_called(mock_which, mock_run)
-
-
-class TestCheckCliAuth(unittest.TestCase):
-
-    checks = (
-        ("gh", "gh_auth", "FAIL", ["gh", "auth", "status"]),
-        ("gsutil", "gsutil_auth", "WARN",
-         ["gsutil", "ls", "gs://test-platform-results-public/"]),
-    )
-
-    def _run(self, binary, command, missing=False, returncode=0, timeout=False):
-        with mock.patch.dict(os.environ, {}, clear=True), \
-             mock.patch.object(prow_testing.shutil, "which",
-                               return_value=None if missing else "/mock/bin/tool") as mock_which, \
-             mock.patch.object(prow_testing.subprocess, "run",
-                               return_value=mock.Mock(returncode=returncode,
-                                                      stderr="mock failure")) as mock_run:
-            if timeout:
-                mock_run.side_effect = subprocess.TimeoutExpired(
-                    command, 30, output=_AUTH_DIAGNOSTICS,
+                run.side_effect = subprocess.TimeoutExpired(
+                    _AUTH_COMMANDS[binary], 30, output=_AUTH_DIAGNOSTICS,
                     stderr=_AUTH_DIAGNOSTICS,
                 )
             result = getattr(prow_testing, f"_check_{binary}_auth")()
-        mock_which.assert_called_once_with(binary)
-        if missing:
-            mock_run.assert_not_called()
-        else:
-            mock_run.assert_called_once_with(
-                command, capture_output=True, text=True, timeout=30,
+        self.assertEqual(result["check"], f"{binary}_auth")
+        if run.called:
+            run.assert_called_once_with(
+                _AUTH_COMMANDS[binary], capture_output=True, text=True, timeout=30,
             )
-        return result
+        return result, lookup, run
 
-    def test_success_passes(self):
-        for binary, check, _, command in self.checks:
-            with self.subTest(binary=binary):
-                result = self._run(binary, command)
-                self.assertEqual(result["check"], check)
-                self.assertEqual(result["status"], "PASS")
-
-    def test_missing_cli(self):
-        for binary, check, failure_status, command in self.checks:
-            with self.subTest(binary=binary):
-                result = self._run(binary, command, missing=True)
-                self.assertEqual(result["check"], check)
-                self.assertEqual(result["status"], failure_status)
-                self.assertIn("not found", result["reason"])
-
-    def test_nonzero_result(self):
-        for binary, check, failure_status, command in self.checks:
-            with self.subTest(binary=binary):
-                result = self._run(binary, command, returncode=1)
-                self.assertEqual(result["check"], check)
-                self.assertEqual(result["status"], failure_status)
-
-    def test_timeout_without_diagnostics(self):
-        for binary, check, failure_status, command in self.checks:
-            with self.subTest(binary=binary):
-                result = self._run(binary, command, timeout=True)
-                self.assertEqual(result["check"], check)
-                self.assertEqual(result["status"], failure_status)
-                self.assertIn("timed out after 30 seconds", result["reason"])
-                self.assertEqual(set(result), {"check", "status", "reason"})
-                for sentinel in _AUTH_DIAGNOSTIC_SENTINELS:
-                    self.assertNotIn(sentinel, json.dumps(result))
-
-
-class TestAuthDiagnosticSafety(unittest.TestCase):
-
-    checks = (
-        ("gh", "FAIL", "gh authentication check failed. Run 'gh auth login'."),
-        ("aws", "FAIL", (
-            "AWS authentication check failed. Verify your AWS profile or access keys."
-        )),
-        ("gsutil", "WARN", (
-            "gsutil authentication check failed. Run 'gcloud auth login' "
-            "interactively before the 'download' step."
-        )),
-    )
-
-    def _assert_safe_failure(self, result, binary, status, reason):
-        self.assertEqual(result, {
-            "check": f"{binary}_auth", "status": status, "reason": reason,
-        })
-        for sentinel in _AUTH_DIAGNOSTIC_SENTINELS:
-            self.assertNotIn(sentinel, json.dumps(result))
-
-    def test_nonzero_helpers_do_not_expose_diagnostics(self):
-        for binary, status, reason in self.checks:
-            with self.subTest(binary=binary), \
-                 mock.patch.dict(os.environ, {"AWS_PROFILE": "mock-profile"}, clear=True), \
-                 mock.patch.object(prow_testing.shutil, "which", return_value="/mock/bin/tool"), \
-                 mock.patch.object(prow_testing.subprocess, "run", return_value=mock.Mock(
-                     returncode=1, stdout=_AUTH_DIAGNOSTICS, stderr=_AUTH_DIAGNOSTICS,
-                 )):
-                result = getattr(prow_testing, f"_check_{binary}_auth")()
-                self._assert_safe_failure(result, binary, status, reason)
-
-    def test_preflight_nonzero_auth_does_not_expose_diagnostics(self):
-        for binary, status, reason in self.checks:
-            with self.subTest(binary=binary):
-                def run(command, failed_binary=binary, **kwargs):
-                    return mock.Mock(
-                        returncode=1 if command[0] == failed_binary else 0,
-                        stdout=_AUTH_DIAGNOSTICS, stderr=_AUTH_DIAGNOSTICS,
-                    )
-
-                output = io.StringIO()
-                error_output = io.StringIO()
-                with mock.patch.dict(os.environ, {"AWS_PROFILE": "mock-profile"}, clear=True), \
-                     mock.patch.object(prow_testing.shutil, "which", return_value="/mock/bin/tool"), \
-                     mock.patch.object(prow_testing.subprocess, "run", side_effect=run), \
-                     mock.patch.object(prow_testing, "_check_s3_rpms", return_value={
-                         "check": "s3_rpms", "status": "PASS", "reason": "mock RPMs present",
-                     }), \
-                     mock.patch("sys.stdout", output), \
-                     mock.patch("sys.stderr", error_output), \
-                     self.assertLogs(prow_testing.logger, level="INFO") as captured_logs:
-                    args = argparse.Namespace(version="4.22.1")
-                    if status == "FAIL":
-                        with self.assertRaises(SystemExit) as raised:
-                            prow_testing.cmd_preflight(args)
-                        self.assertEqual(raised.exception.code, 1)
-                    else:
-                        prow_testing.cmd_preflight(args)
-
-                result = json.loads(output.getvalue())
-                self.assertEqual(result["action"], "preflight")
-                self.assertEqual(result["status"], "fail" if status == "FAIL" else "warn")
-                failed_check = next(check for check in result["checks"]
-                                    if check["check"] == f"{binary}_auth")
-                self._assert_safe_failure(failed_check, binary, status, reason)
-                emitted_text = output.getvalue() + error_output.getvalue() + "\n".join(captured_logs.output)
-                for sentinel in _AUTH_DIAGNOSTIC_SENTINELS:
-                    self.assertNotIn(sentinel, emitted_text)
-
-
-class TestPreflightAuthTimeouts(unittest.TestCase):
-
-    def _run_timeout(self, binary, check_status, overall_status, exit_code=None):
+    def _preflight(self, binary, timeout):
         def run(command, **kwargs):
-            if command[0] == binary:
+            if command[0] == binary and timeout:
                 raise subprocess.TimeoutExpired(
-                    command, 30, output=_AUTH_DIAGNOSTICS,
-                    stderr=_AUTH_DIAGNOSTICS,
+                    command, 30, output=_AUTH_DIAGNOSTICS, stderr=_AUTH_DIAGNOSTICS,
                 )
-            return mock.Mock(returncode=0, stderr="")
+            return mock.Mock(returncode=1 if command[0] == binary else 0,
+                             stdout=_AUTH_DIAGNOSTICS, stderr=_AUTH_DIAGNOSTICS)
 
         output = io.StringIO()
-        error_output = io.StringIO()
+        exit_code = 0
         with mock.patch.dict(os.environ, {"AWS_PROFILE": "mock-profile"}, clear=True), \
-             mock.patch.object(prow_testing.shutil, "which",
-                               return_value="/mock/bin/tool") as mock_which, \
-             mock.patch.object(prow_testing.subprocess, "run", side_effect=run) as mock_run, \
+             mock.patch.object(prow_testing.shutil, "which", return_value="/mock/bin/tool"), \
+             mock.patch.object(prow_testing.subprocess, "run", side_effect=run), \
              mock.patch.object(prow_testing, "_check_s3_rpms", return_value={
                  "check": "s3_rpms", "status": "PASS", "reason": "mock RPMs present",
              }), \
-             mock.patch("sys.stdout", output), \
-             mock.patch("sys.stderr", error_output), \
-             self.assertLogs(prow_testing.logger, level="INFO") as captured_logs:
-            args = argparse.Namespace(version="4.22.1")
-            if exit_code is None:
-                prow_testing.cmd_preflight(args)
-            else:
-                with self.assertRaises(SystemExit) as raised:
-                    prow_testing.cmd_preflight(args)
-                self.assertEqual(raised.exception.code, exit_code)
-
+             mock.patch("sys.stdout", output):
+            try:
+                prow_testing.cmd_preflight(argparse.Namespace(version="4.22.1"))
+            except SystemExit as error:
+                exit_code = error.code
         result = json.loads(output.getvalue())
-        self.assertEqual(result["action"], "preflight")
-        self.assertEqual(result["version"], "4.22.1")
-        self.assertEqual(result["status"], overall_status)
-        expected_checks = {
-            "gh_auth": "PASS", "aws_auth": "PASS",
-            "s3_rpms": "PASS", "gsutil_auth": "PASS",
-        }
-        expected_checks[f"{binary}_auth"] = check_status
-        self.assertEqual(
-            {check["check"]: check["status"] for check in result["checks"]},
-            expected_checks,
-        )
-        timeout_check = next(check for check in result["checks"]
-                             if check["check"] == f"{binary}_auth")
-        self.assertIn("timed out after 30 seconds", timeout_check["reason"])
-        self.assertEqual(set(timeout_check), {"check", "status", "reason"})
-        emitted_text = output.getvalue() + error_output.getvalue() + "\n".join(captured_logs.output)
-        for sentinel in _AUTH_DIAGNOSTIC_SENTINELS:
-            self.assertNotIn(sentinel, emitted_text)
-        self.assertEqual(mock_which.call_args_list,
-                         [mock.call("gh"), mock.call("aws"), mock.call("gsutil")])
-        self.assertEqual(mock_run.call_args_list, [
-            mock.call(["gh", "auth", "status"],
-                      capture_output=True, text=True, timeout=30),
-            mock.call(["aws", "sts", "get-caller-identity"],
-                      capture_output=True, text=True, timeout=30),
-            mock.call(["gsutil", "ls", "gs://test-platform-results-public/"],
-                      capture_output=True, text=True, timeout=30),
-        ])
+        self.assertEqual((result["action"], result["version"]), ("preflight", "4.22.1"))
+        self.assertEqual(result["status"], "warn" if binary == "gsutil" else "fail")
+        self.assertEqual(exit_code, 0 if binary == "gsutil" else 1)
+        expected = {f"{name}_auth": "PASS" for name in _AUTH_COMMANDS}
+        expected.update(s3_rpms="PASS")
+        expected[f"{binary}_auth"] = "WARN" if binary == "gsutil" else "FAIL"
+        self.assertEqual({check["check"]: check["status"] for check in result["checks"]}, expected)
+        return output.getvalue()
 
-    def test_gh_timeout_emits_json_and_exits_one(self):
-        self._run_timeout("gh", "FAIL", "fail", exit_code=1)
+    def test_auth_successes(self):
+        cases = [(binary, None) for binary in _AUTH_COMMANDS]
+        cases.append(("aws", {"AWS_ACCESS_KEY_ID": "mock-access-key",
+                              "AWS_SECRET_ACCESS_KEY": "mock-secret-key"}))
+        for binary, env in cases:
+            with self.subTest(binary=binary, credentials=env):
+                result, lookup, run = self._auth(binary, env=env)
+                self.assertEqual(result["status"], "PASS")
+                lookup.assert_called_once_with(binary)
+                run.assert_called_once()
 
-    def test_aws_timeout_emits_json_and_exits_one(self):
-        self._run_timeout("aws", "FAIL", "fail", exit_code=1)
+    def test_aws_missing_credentials(self):
+        for env in ({}, {"AWS_ACCESS_KEY_ID": "mock-access-key"},
+                    {"AWS_SECRET_ACCESS_KEY": "mock-secret-key"}):
+            with self.subTest(credentials=env):
+                result, lookup, run = self._auth("aws", env=env, missing=True)
+                self.assertEqual(result["status"], "FAIL")
+                self.assertIn("No AWS credentials", result["reason"])
+                lookup.assert_not_called()
+                run.assert_not_called()
 
-    def test_gsutil_timeout_emits_json_without_exit(self):
-        self._run_timeout("gsutil", "WARN", "warn")
+    def test_missing_binaries(self):
+        for binary in _AUTH_COMMANDS:
+            with self.subTest(binary=binary):
+                result, lookup, run = self._auth(binary, missing=True)
+                self.assertEqual(result["status"], "WARN" if binary == "gsutil" else "FAIL")
+                self.assertIn("not found", result["reason"])
+                lookup.assert_called_once_with(binary)
+                run.assert_not_called()
+
+    def test_profile_with_access_key_without_secret_fails(self):
+        result, _, run = self._auth("aws", env={
+            "AWS_PROFILE": "mock-profile", "AWS_ACCESS_KEY_ID": "mock-access-key",
+        }, returncode=255)
+        self.assertEqual(result["status"], "FAIL")
+        run.assert_called_once()
+
+    def test_profile_with_secret_without_access_key_passes(self):
+        result, _, run = self._auth("aws", env={
+            "AWS_PROFILE": "mock-profile", "AWS_SECRET_ACCESS_KEY": "mock-secret-key",
+        })
+        self.assertEqual(result["status"], "PASS")
+        run.assert_called_once()
+
+    def test_auth_failures_do_not_expose_diagnostics(self):
+        for binary in _AUTH_COMMANDS:
+            for timeout in (False, True):
+                with self.subTest(binary=binary, timeout=timeout):
+                    result, _, run = self._auth(binary, returncode=1, timeout=timeout)
+                    self.assertEqual(result["status"], "WARN" if binary == "gsutil" else "FAIL")
+                    self.assertEqual(set(result), {"check", "status", "reason"})
+                    self.assertIn("timed out after 30 seconds" if timeout else
+                                  "authentication check failed", result["reason"])
+                    run.assert_called_once()
+                    emitted = json.dumps(result) + self._preflight(binary, timeout)
+                    for sentinel in _AUTH_DIAGNOSTIC_SENTINELS:
+                        self.assertNotIn(sentinel, emitted)
 
 
 if __name__ == "__main__":
