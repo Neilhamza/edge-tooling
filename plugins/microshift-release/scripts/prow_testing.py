@@ -218,8 +218,7 @@ def _check_gh_auth():
         return {
             "check": "gh_auth",
             "status": "FAIL",
-            "reason": "gh CLI is not authenticated. Run 'gh auth login'.",
-            "details": [result.stderr.strip()],
+            "reason": "gh authentication check failed. Run 'gh auth login'.",
         }
 
     return {
@@ -270,8 +269,10 @@ def _check_aws_auth():
         return {
             "check": "aws_auth",
             "status": "FAIL",
-            "reason": "AWS credentials are set but rejected — likely expired.",
-            "details": [result.stderr.strip().splitlines()[-1] if result.stderr.strip() else ""],
+            "reason": (
+                "AWS authentication check failed. Verify your AWS profile "
+                "or access keys."
+            ),
         }
 
     return {
@@ -321,12 +322,9 @@ def _check_gsutil_auth():
             "check": "gsutil_auth",
             "status": "WARN",
             "reason": (
-                "gsutil cannot access the public GCS bucket — likely needs "
-                "'gcloud auth login' (run interactively, in your own "
-                "terminal; reauth cannot complete non-interactively). This "
-                "will block the 'download' step later."
+                "gsutil authentication check failed. Run 'gcloud auth login' "
+                "interactively before the 'download' step."
             ),
-            "details": [result.stderr.strip().splitlines()[-1] if result.stderr.strip() else ""],
         }
 
     return {
