@@ -195,6 +195,145 @@ def _check_s3_rpms(v):
     }
 
 
+def _check_gh_auth():
+    """Check that the gh CLI is installed and authenticated."""
+    if not shutil.which("gh"):
+        return {
+            "check": "gh_auth",
+            "status": "FAIL",
+            "reason": "gh CLI not found. Install and authenticate the gh CLI.",
+        }
+
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "status"], capture_output=True, text=True, timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "check": "gh_auth",
+            "status": "FAIL",
+            "reason": "gh authentication check timed out after 30 seconds.",
+        }
+    if result.returncode != 0:
+        return {
+            "check": "gh_auth",
+            "status": "FAIL",
+            "reason": "gh authentication check failed. Run 'gh auth login'.",
+        }
+
+    return {
+        "check": "gh_auth",
+        "status": "PASS",
+        "reason": "gh CLI is authenticated",
+    }
+
+
+def _check_aws_auth():
+    """Require AWS credentials in the environment before preflight runs.
+
+    s3_rpms here, and `upload` later, shell out to bare `aws`. With nothing
+    exported those fail with a generic "Unable to locate credentials" from
+    deep inside s3_rpms; this fails fast instead.
+    """
+    if not (os.environ.get("AWS_PROFILE") or (
+            os.environ.get("AWS_ACCESS_KEY_ID")
+            and os.environ.get("AWS_SECRET_ACCESS_KEY"))):
+        return {
+            "check": "aws_auth",
+            "status": "FAIL",
+            "reason": (
+                "No AWS credentials set. Export AWS_ACCESS_KEY_ID and "
+                "AWS_SECRET_ACCESS_KEY, or AWS_PROFILE=<profile>."
+            ),
+        }
+
+    if not shutil.which("aws"):
+        return {
+            "check": "aws_auth",
+            "status": "FAIL",
+            "reason": "aws CLI not found. Install the AWS CLI.",
+        }
+
+    try:
+        result = subprocess.run(
+            ["aws", "sts", "get-caller-identity"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "check": "aws_auth",
+            "status": "FAIL",
+            "reason": "AWS authentication check timed out after 30 seconds.",
+        }
+    if result.returncode != 0:
+        return {
+            "check": "aws_auth",
+            "status": "FAIL",
+            "reason": (
+                "AWS authentication check failed. Verify your AWS profile "
+                "or access keys."
+            ),
+        }
+
+    return {
+        "check": "aws_auth",
+        "status": "PASS",
+        "reason": "AWS credentials valid",
+    }
+
+
+def _check_gsutil_auth():
+    """Check that gsutil can read the public GCS bucket.
+
+    Only needed later, by `download` — reported as WARN (not FAIL) so it
+    doesn't block PR creation/triggering, but surfaces early enough that it
+    can be fixed in parallel with the ~1-3h CI run instead of being
+    discovered only after jobs finish. gcloud/gsutil reauth status lives
+    entirely in the local credential store, not an env var, so this needs
+    an actual call rather than a presence check.
+    """
+    if not shutil.which("gsutil"):
+        return {
+            "check": "gsutil_auth",
+            "status": "WARN",
+            "reason": "gsutil not found. Needed later for the 'download' step.",
+        }
+
+    # Hardcoded rather than derived from lib.prow's bucket constants: this
+    # check must work regardless of which bucket those point at, since its
+    # whole purpose is verifying anonymous-capable access to the known-public
+    # bucket specifically.
+    try:
+        result = subprocess.run(
+            ["gsutil", "ls", "gs://test-platform-results-public/"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "check": "gsutil_auth",
+            "status": "WARN",
+            "reason": (
+                "gsutil authentication check timed out after 30 seconds. "
+                "Needed later for the 'download' step."
+            ),
+        }
+    if result.returncode != 0:
+        return {
+            "check": "gsutil_auth",
+            "status": "WARN",
+            "reason": (
+                "gsutil authentication check failed. Run 'gcloud auth login' "
+                "interactively before the 'download' step."
+            ),
+        }
+
+    return {
+        "check": "gsutil_auth",
+        "status": "PASS",
+        "reason": "gsutil can access the public GCS bucket",
+    }
+
+
 _GCSWEB_BASE = "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results-public"
 _SCENARIO_ROW_RE = re.compile(
     r'<tr class="(status-pass|status-fail|status-skip)">'
@@ -385,8 +524,17 @@ def cmd_preflight(args):
 
     checks = []
 
+    logger.info("Checking gh CLI authentication...")
+    checks.append(_check_gh_auth())
+
+    logger.info("Checking AWS credentials...")
+    checks.append(_check_aws_auth())
+
     logger.info("Verifying RPMs exist in build cache...")
     checks.append(_check_s3_rpms(v))
+
+    logger.info("Checking gsutil/gcloud authentication...")
+    checks.append(_check_gsutil_auth())
 
     has_fail = any(c["status"] == "FAIL" for c in checks)
     has_warn = any(c["status"] == "WARN" for c in checks)
