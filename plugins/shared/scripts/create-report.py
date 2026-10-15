@@ -1022,11 +1022,21 @@ def render_images_section(images_tab_data):
                     # records are architecture-specific, so use its first
                     # architecture's image ID to open that release in Catalog.
                     latest_image_id = next(
-                        (arch["image_id"] for arch in repo["versions"][0]["archs"] if arch["image_id"]),
+                        (
+                            arch["image_id"]
+                            for arch in repo["versions"][0]["archs"]
+                            if arch["image_id"]
+                        ),
                         "",
                     )
-                heading_url = f'{repo_url}?image={latest_image_id}' if latest_image_id else repo_url
-                lines.append(f'            <h3><a href="{heading_url}" target="_blank">{_e(repo["display_name"])}</a></h3>')
+                heading_url = (
+                    f'{repo_url}?image={latest_image_id}'
+                    if latest_image_id else repo_url
+                )
+                lines.append(
+                    f'            <h3><a href="{_e(heading_url)}" '
+                    f'target="_blank">{_e(repo["display_name"])}</a></h3>'
+                )
             else:
                 repo_url = ""
                 lines.append(f'            <h3>{_e(repo["display_name"])}</h3>')
@@ -1047,7 +1057,10 @@ def render_images_section(images_tab_data):
                     badge = f'<span class="grade-badge {gcss}">{_e(a["grade"])}</span>'
                     if repo_url and a["image_id"]:
                         href = f'{repo_url}?image={a["image_id"]}&architecture={a["arch"]}'
-                        arch_parts.append(f'<a href="{href}" target="_blank">{_e(a["arch"])}</a>&nbsp;{badge}')
+                        arch_parts.append(
+                            f'<a href="{_e(href)}" target="_blank">'
+                            f'{_e(a["arch"])}</a>&nbsp;{badge}'
+                        )
                     else:
                         arch_parts.append(f'{_e(a["arch"])}&nbsp;{badge}')
                 lines.append(f'                <td>{"&nbsp; ".join(arch_parts)}</td>')
