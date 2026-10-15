@@ -1016,7 +1016,17 @@ def render_images_section(images_tab_data):
             catalog_id = repo.get("catalog_id", "")
             if catalog_id:
                 repo_url = f'https://catalog.redhat.com/en/software/containers/{repo["name"]}/{catalog_id}'
-                lines.append(f'            <h3><a href="{repo_url}" target="_blank">{_e(repo["display_name"])}</a></h3>')
+                latest_image_id = ""
+                if repo["versions"]:
+                    # The first version is the latest for this release. Image
+                    # records are architecture-specific, so use its first
+                    # architecture's image ID to open that release in Catalog.
+                    latest_image_id = next(
+                        (arch["image_id"] for arch in repo["versions"][0]["archs"] if arch["image_id"]),
+                        "",
+                    )
+                heading_url = f'{repo_url}?image={latest_image_id}' if latest_image_id else repo_url
+                lines.append(f'            <h3><a href="{heading_url}" target="_blank">{_e(repo["display_name"])}</a></h3>')
             else:
                 repo_url = ""
                 lines.append(f'            <h3>{_e(repo["display_name"])}</h3>')
