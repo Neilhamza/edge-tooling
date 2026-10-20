@@ -18,7 +18,7 @@ from _jira_transforms import load_json, write_output, parse_date, extract_sprint
 
 DONE_STATUSES_STORIES = {"Closed"}
 DONE_STATUSES_OCPBUGS = {"Closed", "Verified"}
-DONE_STATUSES_EPICS = {"Closed", "Dev Complete"}
+DONE_STATUSES_EPICS = {"Closed", "Dev Complete", "Testing", "Release Pending"}
 ACTIVE_STORY_STATUSES = {"In Progress", "Review"}
 NEW_FEATURE_STATUSES = {"New"}
 
